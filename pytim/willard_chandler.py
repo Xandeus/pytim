@@ -315,7 +315,7 @@ class WillardChandler(Interface):
         # (december 2003). DOI: 10.1080/10867651.2003.10487582
         volume = self.density_field.reshape(
             tuple(np.array(ngrid[::-1]).astype(int)))
-        verts, faces, normals, values = marching_cubes(
+        verts, faces, normals, values = marching_cubes_lewiner(
             volume, None, spacing=tuple(spacing))
         # note that len(normals) == len(verts): they are normals
         # at the vertices, and not normals of the faces
