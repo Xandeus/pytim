@@ -27,7 +27,7 @@ def generate_grid_in_box(box, npoints, order='zxy'):
     if order == 'zyx':
         z, y, x = np.meshgrid(xyz[0], xyz[1], xyz[2], indexing='ij')
     else:
-        x, y, z = np.meshgrid(xyz[2], xyz[1], xyz[0], indexing='ij')
+        x, y, z = np.meshgrid(xyz[0], xyz[1], xyz[2], indexing='ij')
 
     grid = np.append(x.reshape(-1, 1), y.reshape(-1, 1), axis=1)
     grid = np.append(grid, z.reshape(-1, 1), axis=1)
