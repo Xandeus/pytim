@@ -104,10 +104,10 @@ def write_file(filename,
         if group is not None:
             _write_atomgroup(f, group, atomic_numbers)
         # NOTE the 6-fold roll has been determined empirically.
-        #field = np.roll(
+        # field = np.roll(
         #    np.swapaxes(
         #        scalars.reshape((grid_size[2], grid_size[1], grid_size[0])), 2,
         #        0),
         #    6,
         #    axis=-1).flatten()  # xyz <-> zyx
-        _write_scalar_grid(f, field / maxval)
+        _write_scalar_grid(f, scalars / maxval)

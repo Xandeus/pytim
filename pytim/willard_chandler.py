@@ -303,7 +303,7 @@ class WillardChandler(Interface):
         ngrid, spacing = utilities.compute_compatible_mesh_params(
             self.mesh, box)
         self.spacing, self.ngrid = spacing, ngrid
-        grid = utilities.generate_grid_in_box(box, ngrid, order='xyz')
+        grid = utilities.generate_grid_in_box(box, ngrid, order='zyx')
         kernel, _ = utilities.density_map(pos, grid, self.alpha, box)
 
         kernel.pos = pos.copy()
