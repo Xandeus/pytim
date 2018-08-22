@@ -11,6 +11,11 @@ from .properties import Layers, Clusters, Sides, _create_property
 from .properties import guess_radii, _missing_attributes
 
 
+class StandardError(Exception):
+    """Thrown if a Residue or Bead is not found in a given context."""
+    pass
+
+
 class SanityCheck(object):
     def __init__(self, interface):
 
