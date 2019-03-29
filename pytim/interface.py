@@ -43,8 +43,8 @@ class Interface(object):
         _create_property('alpha', "(float) real space cutoff")
     layers, _layers =\
         _create_property('layers', "AtomGroups of atoms in layers")
-    itim_group, _itim_group =\
-        _create_property('itim_group', "(AtomGroup) the group, "
+    analysis_group, _analysis_group =\
+        _create_property('analysis_group', "(AtomGroup) the group, "
                          "the surface of which should be computed")
     cluster_cut, _cluster_cut =\
         _create_property('cluster_cut', "(real) cutoff for phase "
@@ -136,8 +136,8 @@ class Interface(object):
             _group.clusters = cluster
 
     def _assign_symmetry(self, symmetry):
-        if self.itim_group is None:
-            raise TypeError(messages.UNDEFINED_ITIM_GROUP)
+        if self.analysis_group is None:
+            raise TypeError(messages.UNDEFINED_ANALYSIS_GROUP)
         if symmetry == 'guess':
             raise ValueError("symmetry 'guess' To be implemented")
         else:
@@ -164,10 +164,10 @@ class Interface(object):
                     self.cluster_group += extra[x_ids_other]
 
             # next, we add the atoms belonging to the main phase
-            self.cluster_group += self.itim_group
+            self.cluster_group += self.analysis_group
 
             # groups have been checked already in _sanity_checks()
-            # self.cluster_group at this stage is composed of itim_group +
+            # self.cluster_group at this stage is composed of analysis_group +
             # the smaller clusters of the other phase
             labels, counts, neighbors = utilities.do_cluster_analysis_dbscan(
                 self.cluster_group, cluster_cut,
@@ -214,8 +214,7 @@ class Interface(object):
             self.cluster_group = self.cluster_group[ids_max]
             self.n_neighbors = neighbors
         else:
-            self.cluster_group = self.itim_group
-            self.label_group(self.itim_group, cluster=1)
+            self.cluster_group = self.analysis_group
             self.label_group(self.cluster_group, cluster=0)
 
     def is_buried(self, pos):
@@ -233,6 +232,7 @@ class Interface(object):
         return condition
 
     def reset_labels(self):
+        """ Reset labels before interfacial analysis"""
         self.label_group(
             self.universe.atoms, beta=0.0, layer=-1, cluster=-1, side=-1)
 
@@ -256,6 +256,13 @@ class Interface(object):
                 z=_pos_group,
                 center_direction=direction,
                 halfbox_shift=halfbox_shift)
+
+    def prepare_box(self):
+        """ Before the analysis, pack every molecule into the box.
+            Keep the original positions for latter use.
+        """
+        self.original_positions = np.copy(self.universe.atoms.positions[:])
+        self.universe.atoms.pack_into_box()
 
     @staticmethod
     def _center(group, direction, halfbox_shift=False):
@@ -338,7 +345,7 @@ class Interface(object):
         translation = [0, 0, 0]
         translation[normal] = box / 2.
         universe.atoms.positions += np.array(translation)
-        universe.atoms.pack_into_box(universe.dimensions[:3])
+        universe.atoms.pack_into_box()
 
     def _shift_positions_to_middle(self):
         Interface.shift_positions_to_middle(self.universe, self.normal)
@@ -357,7 +364,7 @@ class Interface(object):
                     Interface._center(group, xyz, halfbox_shift=False)
                 except ValueError:
                     pass
-            group.universe.atoms.pack_into_box(group.universe.dimensions[:3])
+            group.universe.atoms.pack_into_box()
 
     def center(self, planar_to_origin=False):
         Interface.center_system(

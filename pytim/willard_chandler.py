@@ -6,113 +6,23 @@
 """
 
 from __future__ import print_function
-import numpy as np
 from skimage import measure
+import numpy as np
+
+from . import messages
+from . import utilities, cube, wavefront_obj
+from .sanity_check import SanityCheck
+from .vtk import Writevtk
+
+from .interface import Interface
+from .patches import patchTrajectory, patchOpenMM, patchMDTRAJ
+
+np.set_printoptions(legacy=False)  # fixes problem with skimage
+
 try:
     marching_cubes = measure.marching_cubes
 except AttributeError:
-    marching_cubes =  measure.marching_cubes_lewiner
-
-
-from . import messages
-from . import utilities, vtk, cube, wavefront_obj
-from .sanity_check import SanityCheck
-
-from .interface import Interface
-from .patches import PatchTrajectory, PatchOpenMM, PatchMDTRAJ
-
-
-class Writevtk(object):
-    def __init__(self, interface):
-        self.interface = interface
-
-    def _dump_group(self, group, filename):
-        """ Save the particles n a vtk file named consecutively using the frame
-            number.
-        """
-        radii, types, color = group.radii, group.types, []
-        for element in types:
-            try:
-                c = (utilities.atoms_maps[element])['color']
-            except KeyError:  # defaults to Carbon
-                c = (utilities.atoms_maps['C'])['color']
-            color.append(c)
-        color = (np.array(color) / 256.).tolist()
-        vtk.write_atomgroup(filename, group, color=color, radius=radii)
-
-    def density(self, filename='pytim_dens.vtk', sequence=False):
-        """ Write to vtk files the volumetric density.
-
-            :param str filename:  the file name
-            :param bool sequence: if true writes a sequence of files adding
-                                  the frame to the filename
-
-            >>> import MDAnalysis as mda
-            >>> import pytim
-            >>> from pytim.datafiles import MICELLE_PDB
-            >>> u = mda.Universe(MICELLE_PDB)
-            >>> g = u.select_atoms('resname DPC')
-            >>> inter= pytim.WillardChandler(u, group=g, alpha=3.0, mesh=2.0)
-
-            >>> inter.writevtk.density('dens.vtk') # writes on dens.vtk
-            >>> inter.writevtk.density('dens.vtk',sequence=True) # dens.<n>.vtk
-
-        """
-        inter = self.interface
-        if sequence is True:
-            filename = vtk.consecutive_filename(inter.universe, filename)
-        vtk.write_scalar_grid(filename, inter.ngrid, inter.spacing,
-                              inter.density_field)
-
-    def particles(self, filename='pytim_part.vtk', group=None, sequence=False):
-        """ Write to vtk files the particles in a group.
-
-            :param str filename:    the file name
-            :param bool sequence:   if true writes a sequence of files adding
-                                    the frame to the filename
-            :param AtomGroup group: if None, writes the whole universe
-
-            >>> import MDAnalysis as mda
-            >>> import pytim
-            >>> from pytim.datafiles import MICELLE_PDB
-            >>> u = mda.Universe(MICELLE_PDB)
-            >>> g = u.select_atoms('resname DPC')
-            >>> inter= pytim.WillardChandler(u, group=g, alpha=3.0, mesh=2.0)
-
-            >>> # writes on part.vtk
-            >>> inter.writevtk.particles('part.vtk')
-            >>> # writes on part.<frame>.vtk
-            >>> inter.writevtk.particles('part.vtk',sequence=True)
-        """
-
-        inter = self.interface
-        if sequence is True:
-            filename = vtk.consecutive_filename(inter.universe, filename)
-        if group is None:
-            group = inter.universe.atoms
-        self._dump_group(group, filename)
-
-    def surface(self, filename='pytim_surf.vtk', sequence=False):
-        """ Write to vtk files the triangulated surface.
-
-            :param str filename:  the file name
-            :param bool sequence: if true writes a sequence of files adding
-                                  the frame to the filename
-
-            >>> import MDAnalysis as mda
-            >>> import pytim
-            >>> from pytim.datafiles import MICELLE_PDB
-            >>> u = mda.Universe(MICELLE_PDB)
-            >>> g = u.select_atoms('resname DPC')
-            >>> inter= pytim.WillardChandler(u, group=g, alpha=3.0, mesh=2.0)
-            >>> inter.writevtk.surface('surf.vtk') # writes on surf.vtk
-            >>> inter.writevtk.surface('surf.vtk',sequence=True) # surf.<n>.vtk
-        """
-        inter = self.interface
-        vertices, faces, normals = list(inter.triangulated_surface[0:3])
-        if sequence is True:
-            filename = vtk.consecutive_filename(inter.universe, filename)
-        vtk.write_triangulation(filename, vertices[::, ::-1], faces, normals)
+    marching_cubes = measure.marching_cubes_lewiner
 
 
 class WillardChandler(Interface):
@@ -202,22 +112,22 @@ class WillardChandler(Interface):
                  **kargs):
 
         self.autoassign, self.do_center = autoassign, centered
-        sanity = SanityCheck(self)
-        sanity.assign_universe(
-            universe, radii_dict=radii_dict, warnings=warnings)
+        sanity = SanityCheck(self, warnings=warnings)
+        sanity.assign_universe(universe, group)
         sanity.assign_alpha(alpha)
 
         if mesh <= 0:
             raise ValueError(messages.MESH_NEGATIVE)
         self.mesh, self.spacing, self.ngrid, self.PDB = mesh, None, None, {}
 
-        sanity.assign_radii()
+        sanity.assign_radii(radii_dict=radii_dict)
 
-        sanity.assign_groups(group, cluster_cut, extra_cluster_groups)
+        sanity.assign_cluster_params(cluster_cut,
+                                     cluster_threshold_density, extra_cluster_groups)
 
         self._assign_symmetry(symmetry)
 
-        PatchTrajectory(self.universe.trajectory, self)
+        patchTrajectory(self.universe.trajectory, self)
         self._assign_layers()
         self._atoms = self._layers[:]  # this is an empty AtomGroup
         self.writevtk = Writevtk(self)
@@ -282,14 +192,11 @@ class WillardChandler(Interface):
             triangulated isosurface, the density and the particles.
 
         """
-        self.label_group(
-            self.universe.atoms, beta=0.0, layer=-1, cluster=-1, side=-1)
+        self.reset_labels()
         # we assign an empty group for consistency
         self._layers, self.normal = self.universe.atoms[:0], None
 
-        # this can be used later to shift back to the original shift
-        self.original_positions = np.copy(self.universe.atoms.positions[:])
-        self.universe.atoms.pack_into_box()
+        self.prepare_box()
 
         self._define_cluster_group()
 

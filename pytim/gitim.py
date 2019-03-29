@@ -18,7 +18,7 @@ except ImportError:
     from scipy.spatial import Delaunay
 
 from .interface import Interface
-from .patches import PatchTrajectory, PatchOpenMM, PatchMDTRAJ
+from .patches import patchTrajectory, patchOpenMM, patchMDTRAJ
 from circumradius import circumradius
 
 
@@ -135,21 +135,20 @@ J. Chem. Phys. 138, 044110, 2013)*
         self.do_center = centered
 
         self.biggest_cluster_only = biggest_cluster_only
-        sanity = SanityCheck(self)
-        sanity.assign_universe(
-            universe, radii_dict=radii_dict, warnings=warnings)
+        sanity = SanityCheck(self, warnings=warnings)
+        sanity.assign_universe(universe, group)
         sanity.assign_alpha(alpha)
 
-        self.cluster_threshold_density = cluster_threshold_density
         self.max_layers = max_layers
-        self._layers = np.empty([max_layers], dtype=type(universe.atoms))
+        self._layers = np.empty([max_layers], dtype=type(self.universe.atoms))
         self.info = info
         self.normal = None
         self.PDB = {}
         self.molecular = molecular
-        sanity.assign_groups(group, cluster_cut, extra_cluster_groups)
+        sanity.assign_cluster_params(cluster_cut,
+                                     cluster_threshold_density, extra_cluster_groups)
         sanity.check_multiple_layers_options()
-        sanity.assign_radii()
+        sanity.assign_radii(radii_dict=radii_dict)
 
         self._assign_symmetry(symmetry)
         try:
@@ -171,7 +170,7 @@ J. Chem. Phys. 138, 044110, 2013)*
                 self._surfaces[nlayer] = SurfaceGenericInterface(
                     self, options={'layer': nlayer})
 
-        PatchTrajectory(self.universe.trajectory, self)
+        patchTrajectory(self.universe.trajectory, self)
 
         self._assign_layers()
 
@@ -244,9 +243,8 @@ J. Chem. Phys. 138, 044110, 2013)*
 
     def _assign_layers_setup(self):
         self.reset_labels()
-        # this can be used later to shift back to the original shift
-        self.original_positions = np.copy(self.universe.atoms.positions[:])
-        self.universe.atoms.pack_into_box()
+
+        self.prepare_box()
 
         self._define_cluster_group()
 
@@ -255,7 +253,7 @@ J. Chem. Phys. 138, 044110, 2013)*
             self.center()
 
         # first we label all atoms in group to be in the gas phase
-        self.label_group(self.itim_group.atoms, beta=0.5)
+        self.label_group(self.analysis_group.atoms, beta=0.5)
         # then all atoms in the larges group are labelled as liquid-like
         self.label_group(self.cluster_group.atoms, beta=0.0)
 

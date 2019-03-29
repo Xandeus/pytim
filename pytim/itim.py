@@ -20,7 +20,7 @@ from .surface import SurfaceFlatInterface as Surface
 from .sanity_check import SanityCheck
 
 from .interface import Interface
-from .patches import PatchTrajectory, PatchOpenMM, PatchMDTRAJ
+from .patches import patchTrajectory, patchOpenMM, patchMDTRAJ
 
 
 class ITIM(Interface):
@@ -125,6 +125,15 @@ J. Comp. Chem. 29, 945, 2008)*
         >>> for ts in u.trajectory[::50]:
         ... 	ts2 = u2.trajectory[ts.frame]
 
+
+        >>> # pytim can be used also on top of mdtraj (MDAnalysis must be present,though)
+        >>> import mdtraj
+        >>> import pytim
+        >>> from pytim.datafiles import WATER_GRO, WATER_XTC
+        >>> t = mdtraj.load_xtc(WATER_XTC,top=WATER_GRO)
+        >>> inter = pytim.ITIM(t)
+
+
         .. _MDAnalysis: http://www.mdanalysis.org/
         .. _MDTraj: http://www.mdtraj.org/
         .. _OpenMM: http://www.openmm.org/
@@ -190,13 +199,11 @@ J. Comp. Chem. 29, 945, 2008)*
         self.symmetry = 'planar'
         self.do_center = centered
 
-        sanity = SanityCheck(self)
-        sanity.assign_universe(
-            universe, radii_dict=radii_dict, warnings=warnings)
+        sanity = SanityCheck(self, warnings=warnings)
+        sanity.assign_universe(universe, group)
         sanity.assign_alpha(alpha)
         sanity.assign_mesh(mesh)
 
-        self.cluster_threshold_density = cluster_threshold_density
         self.max_layers = max_layers
         self._layers = np.empty(
             [2, max_layers], dtype=self.universe.atoms[0].__class__)
@@ -206,18 +213,19 @@ J. Comp. Chem. 29, 945, 2008)*
         self.PDB = {}
         self.molecular = molecular
 
-        sanity.assign_groups(group, cluster_cut, extra_cluster_groups)
+        sanity.assign_cluster_params(cluster_cut,
+                                     cluster_threshold_density, extra_cluster_groups)
         sanity.assign_normal(normal)
-        sanity.assign_radii()
+        sanity.assign_radii(radii_dict=radii_dict)
 
         self.grid = None
         self.use_threads = False
 
-        PatchTrajectory(self.universe.trajectory, self)
+        patchTrajectory(self.universe.trajectory, self)
 
         self._assign_layers()
 
-    def _assign_mesh(self):
+    def _create_mesh(self):
         """ Mesh assignment method
 
             Based on a target value, determine a mesh size for the testlines
@@ -236,10 +244,7 @@ J. Comp. Chem. 29, 945, 2008)*
         _y = np.linspace(0, box[1], num=self.mesh_ny, endpoint=False)
         _X, _Y = np.meshgrid(_x, _y)
         self.meshpoints = np.array([_X.ravel(), _Y.ravel()]).T
-        # cKDTree requires a box vetor with length double the dimension,
-        _box = np.zeros(4)
-        _box[:2] = box[:2]
-        self.meshtree = cKDTree(self.meshpoints, boxsize=_box[:2])
+        self.meshtree = cKDTree(self.meshpoints, boxsize=box[:2])
 
     def _touched_lines(self, atom, _x, _y, _z, _radius):
         return self.meshtree.query_ball_point([_x[atom], _y[atom]],
@@ -314,25 +319,14 @@ J. Comp. Chem. 29, 945, 2008)*
             queue.put(layers)
 
     def _prepare_layers_assignment(self):
-        self._assign_mesh()
+        self._create_mesh()
         size = (2, int(self.max_layers), int(self.mesh_nx) * int(self.mesh_ny))
         self.mask = np.zeros(size, dtype=int)
-
-        # this can be used later to shift back to the original shift
-        self.original_positions = np.copy(self.universe.atoms.positions[:])
-
-        self.universe.atoms.pack_into_box()
-        # in some rare cases, pack_into_box() returns some points which are
-        # at slightly negative position. We set this by hand to zero.
-        p = self.universe.atoms.positions.copy()
-        cond = np.logical_and(self.universe.atoms.positions < 0.0,
-                              self.universe.atoms.positions > -1e-5)
-        p[cond] *= 0.0
-        self.universe.atoms.positions = p
+        self.prepare_box()
 
     def _prelabel_groups(self):
         # first we label all atoms in group to be in the gas phase
-        self.label_group(self.itim_group.atoms, beta=0.5)
+        self.label_group(self.analysis_group.atoms, beta=0.5)
         # then all atoms in the largest group are labelled as liquid-like
         self.label_group(self.cluster_group.atoms, beta=0.0)
 

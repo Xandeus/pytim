@@ -3,7 +3,19 @@
 from __future__ import print_function
 
 
-def PatchTrajectory(trajectory, interface):
+def patchNumpy():
+    # this try/except block patches numpy and provides _validate_lengths
+    # to skimage<=1.14.1
+    import numpy
+    try:
+        numpy.lib.arraypad._validate_lengths
+    except AttributeError:
+        def patch_validate_lengths(ar, crop_width):
+            return numpy.lib.arraypad._as_pairs(crop_width, ar.ndim, as_index=True)
+        numpy.lib.arraypad._validate_lengths = patch_validate_lengths
+
+
+def patchTrajectory(trajectory, interface):
     """ Patch the MDAnalysis trajectory class
 
         this patch makes the layer assignement being automatically
@@ -11,8 +23,11 @@ def PatchTrajectory(trajectory, interface):
     """
     try:
         trajectory.interface
+        trajectory.interface = interface
+
     except AttributeError:
         trajectory.interface = interface
+        trajectory.interface._frame = trajectory.frame
         trajectory.original_read_next_timestep = trajectory._read_next_timestep
 
         trajectory.original_read_frame_with_aux = trajectory._read_frame_with_aux
@@ -22,13 +37,16 @@ def PatchTrajectory(trajectory, interface):
                 tmp = self.original_read_next_timestep(ts=ts)
                 if self.interface.autoassign is True:
                     self.interface._assign_layers()
+                    self.interface._frame = self.frame
                 return tmp
 
             def _read_frame_with_aux(self, frame):
                 if frame != self.frame:
                     tmp = self.original_read_frame_with_aux(frame)
                     if self.interface.autoassign is True:
-                        self.interface._assign_layers()
+                        if self.interface._frame != self.frame:
+                            self.interface._assign_layers()
+                            self.interface._frame = self.frame
                     return tmp
                 return self.ts
 
@@ -40,7 +58,7 @@ def PatchTrajectory(trajectory, interface):
         trajectory.__class__ = PatchedTrajectory
 
 
-def PatchOpenMM(simulation, interface):
+def patchOpenMM(simulation, interface):
     #       return _openmm.CompoundIntegrator_step(self, steps)
     """ Patch the Openmm Simulation class
 
@@ -70,11 +88,22 @@ def PatchOpenMM(simulation, interface):
         simulation.__class__ = PatchedOpenMMSimulation
 
 
-def PatchMDTRAJ(trajectory, universe):
+def patchMDTRAJ(trajectory, universe):
     """ Patch the mdtraj Trajectory class
 
         automates the data exchange between MDAnalysis and mdtraj classes
+
+        Example:
+
+        >>> import mdtraj
+        >>> import pytim
+        >>> from pytim.datafiles import WATER_GRO, WATER_XTC
+        >>> t = mdtraj.load_xtc(WATER_XTC,top=WATER_GRO)
+        >>> inter = pytim.ITIM(t)
+
+
     """
+
     try:
         trajectory.universe
     except AttributeError:
@@ -83,7 +112,7 @@ def PatchMDTRAJ(trajectory, universe):
         class PatchedMdtrajTrajectory(trajectory.__class__):
             def __getitem__(self, key):
                 slice_ = self.slice(key)
-                PatchMDTRAJ(slice_, universe)
+                patchMDTRAJ(slice_, universe)
                 if isinstance(key, int):
                     # mdtraj uses nm as distance unit, we need to convert to
                     # Angstrom for MDAnalysis

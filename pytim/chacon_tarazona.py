@@ -11,7 +11,7 @@ from .surface import SurfaceFlatInterface as Surface
 from .sanity_check import SanityCheck
 
 from .interface import Interface
-from .patches import PatchTrajectory, PatchOpenMM, PatchMDTRAJ
+from .patches import patchTrajectory, patchOpenMM, patchMDTRAJ
 
 
 class ChaconTarazona(Interface):
@@ -75,9 +75,8 @@ class ChaconTarazona(Interface):
         self.symmetry = 'planar'
         self.do_center = centered
 
-        sanity = SanityCheck(self)
-        sanity.assign_universe(
-            universe, radii_dict=radii_dict, warnings=warnings)
+        sanity = SanityCheck(self, warnings=warnings)
+        sanity.assign_universe(universe, group)
 
         self.target_mesh = mesh
         if mesh is not None:
@@ -97,15 +96,15 @@ class ChaconTarazona(Interface):
         self.molecular = molecular
 
         # TODO implement cluster group
-        sanity.assign_groups(group, None, None)
+        sanity.assign_cluster_params(None, None, None)
         sanity.assign_normal(normal)
-        sanity.assign_radii()
+        sanity.assign_radii(radii_dict=radii_dict)
 
         self.sorted_indices = None
         self.surf = None
         self.modes = [None, None]
 
-        PatchTrajectory(self.universe.trajectory, self)
+        patchTrajectory(self.universe.trajectory, self)
         self._assign_layers()
 
     def _points_next_to_surface(self, surf, modes, pivot):
@@ -150,7 +149,6 @@ class ChaconTarazona(Interface):
         """
         # TODO add successive layers
         box = self.universe.dimensions[:3]
-        #        surf = self._surfaces[0]
 
         if side == 0:
             sorted_ind = self.sorted_indices[::-1]
@@ -179,8 +177,7 @@ class ChaconTarazona(Interface):
                 self.modes[side] = modes
                 _inlayer_group = self.cluster_group[pivot]
                 if self.molecular is True:
-                    _tmp = _inlayer_group.residues.atoms
-                    _inlayer_group = _tmp
+                    _inlayer_group = _inlayer_group.residues.atoms
                 return _inlayer_group
 
             else:
@@ -191,14 +188,10 @@ class ChaconTarazona(Interface):
             layers.
 
         """
-        self.label_group(
-            self.universe.atoms, beta=0.0, layer=-1, cluster=-1, side=-1)
+        self.reset_labels()
 
         # TODO parallelize
-
-        # this can be used later to shift back to the original shift
-        self.original_positions = np.copy(self.universe.atoms.positions[:])
-        self.universe.atoms.pack_into_box()
+        self.prepare_box()
 
         # groups have been checked already in _sanity_checks()
 
@@ -208,7 +201,7 @@ class ChaconTarazona(Interface):
         # we always (internally) center in Chacon-Tarazona
         self.center(planar_to_origin=True)
         # first we label all atoms in group to be in the gas phase
-        self.label_group(self.itim_group.atoms, beta=0.5)
+        self.label_group(self.analysis_group.atoms, beta=0.5)
         # then all atoms in the largest group are labelled as liquid-like
         self.label_group(self.cluster_group.atoms, beta=0.0)
 
